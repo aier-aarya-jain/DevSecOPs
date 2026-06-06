@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: supabase/postgres:15.1.0.117
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SuperSecretPassword123!}
+      POSTGRES_DB: student_portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d student_portal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - portal-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/student_portal
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-SuperSecretPassword123!}
+      - JWT_SECRET=${JWT_SECRET:-your_super_secret_jwt_key_that_is_at_least_256_bits_long_for_hs256}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - portal-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - portal-network
+
+  sonarqube:
+    image: sonarqube:9.9.1-community
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_JDBC_URL=jdbc:postgresql://db:5432/sonar
+      - SONAR_JDBC_USERNAME=postgres
+      - SONAR_JDBC_PASSWORD=${POSTGRES_PASSWORD:-SuperSecretPassword123!}
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - portal-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - portal-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    networks:
+      - portal-network
+
+volumes:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_logs:
+
+networks:
+  portal-network:
+    driver: bridge
